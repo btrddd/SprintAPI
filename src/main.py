@@ -1,4 +1,6 @@
-from fastapi import FastAPI, status
+from fastapi import FastAPI, status, Request, HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
@@ -77,32 +79,6 @@ class SubmitDataResponse(BaseModel):
     id: Optional[int]
 
 
-def validate_data(data):
-    required_fields = ['beauty_title', 'title', 'add_time', 'user', 'coords', 'level', 'images']
-    for field in required_fields:
-        if field not in data:
-            return False, f'Field "{field}" is required and cannot be empty'
-        
-    required_user_fields = ['email', 'fam', 'name', 'phone']
-    for field in required_user_fields:
-        if field not in data['user']:
-            return False, f'User field "{field}" is required and cannot be empty'
-        
-    required_coords_fields = ['latitude', 'longitude', 'height']
-    for field in required_coords_fields:
-        if field not in data['coords']:
-            return False, f'Coords field "{field}" is required and cannot be empty'
-        
-    images = data['images']
-    if not images:
-        return False, 'There must be at least one image'
-    for image in images:
-        if 'data' not in image or 'title' not in image:
-            return False, 'Each image requires fields "data" and "title"'
-        
-    return True, None
-
-
 app = FastAPI(
     title='Pereval API',
     description='SkillFactory API project',
@@ -110,36 +86,51 @@ app = FastAPI(
 )
 
 
-@app.post('/submit', response_model=SubmitDataResponse)
-def submitData(request: SubmitDataRequest):
-    request_dict = request.model_dump()
+@app.exception_handlers(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            'status': exc.status_code,
+            'message': exc.detail,
+            'id': None
+        }
+    )
 
-    is_valid, error_message = validate_data(request_dict)
-    if not is_valid:
-        return SubmitDataResponse(
-            status=status.HTTP_400_BAD_REQUEST,
-            message=error_message,
-            id=None
-        )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    error = exc.errors()[0]
+    return JSONResponse(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        content={
+            'status': status.HTTP_400_BAD_REQUEST,
+            'message': f'Error: {error['msg']}; loc: {error['loc']}',
+            'id': None
+        }
+    )
+
+
+@app.post('/submit', response_model=SubmitDataResponse)
+async def submitData(request: SubmitDataRequest):
+    request_dict = request.model_dump()
     
     try:
         db_worker = DatabaseWorker()
         db_worker.connect()
         pereval_id = db_worker.add_pereval(request_dict)
     except Exception as ex:
-        return SubmitDataResponse(
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            message=f'Database error: {ex}',
-            id=None
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=ex
         )
     finally:
         db_worker.disconnect()
     
     if not pereval_id:
-        return SubmitDataResponse(
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            message='Error saving to database',
-            id=None
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Error saving to database'
         )
     
     return SubmitDataResponse(
