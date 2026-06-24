@@ -6,7 +6,6 @@ from typing import Optional
 from datetime import datetime
 import re
 
-
 from db.db_worker import DatabaseWorker
 
 
@@ -32,7 +31,7 @@ class CoordsModel(BaseModel):
 
     @field_validator('latitude', 'longitude', 'height')
     @classmethod
-    def validete_coords(cls, coord):
+    def validate_coords(cls, coord):
         try:
             float(coord)
         except ValueError:
@@ -42,7 +41,7 @@ class CoordsModel(BaseModel):
 
 class LevelModel(BaseModel):
     winter: Optional[str]
-    summer: Optional[str] 
+    summer: Optional[str]
     autumn: Optional[str]
     spring: Optional[str]
 
@@ -86,8 +85,8 @@ app = FastAPI(
 )
 
 
-@app.exception_handlers(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -99,20 +98,20 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     error = exc.errors()[0]
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={
             'status': status.HTTP_400_BAD_REQUEST,
-            'message': f'Error: {error['msg']}; loc: {error['loc']}',
+            'message': f'Error: {error["msg"]}; loc: {error["loc"]}',
             'id': None
         }
     )
 
 
 @app.post('/submit', response_model=SubmitDataResponse)
-async def submitData(request: SubmitDataRequest):
+async def submitData(request: SubmitDataRequest) -> SubmitDataResponse:
     request_dict = request.model_dump()
     
     try:
