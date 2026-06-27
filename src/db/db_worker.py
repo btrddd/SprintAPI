@@ -19,6 +19,9 @@ class DatabaseWorker:
         try:
             self.connection = psycopg2.connect(**db_connection_config)
             self.cursor = self.connection.cursor()
+            self.dict_cursor = self.connection.cursor(
+                cursor_factory=extras.RealDictCursor
+            )
         except Exception as ex:
             raise Exception(f'Database connection error:\n{ex}')
         
@@ -87,47 +90,58 @@ class DatabaseWorker:
         except Exception as ex:
             self.disconnect()
             raise Exception(f'Something went wrong while inserting data:\n{ex}')
+        
+    def get_pereval_by_id(self, pereval_id):
+        query = '''
+            WITH pereval_cte AS (
+                SELECT * FROM pereval_added WHERE id = %s
+            )
+            SELECT
+                pereval_cte.*,
+                row_to_json(users) AS user,
+                row_to_json(coords) AS coords,
+                row_to_json(levels) AS levels
+            FROM pereval_cte
+            LEFT JOIN users ON pereval_cte.user_id = users.id
+            LEFT JOIN coords ON pereval_cte.coords_id = coords.id
+            LEFT JOIN levels ON pereval_cte.levels_id = levels.id
+        '''
+
+        self.dict_cursor.execute(
+            query,
+            (pereval_id,)
+        )
+        pereval = self.dict_cursor.fetchone()
+
+        if pereval:
+            pereval = dict(pereval)
+            for key in ['user_id', 'coords_id', 'levels_id']:
+                pereval.pop(key, None)
+            return pereval
+        
+        return None
+
+    def get_pereval_list_by_email(self, email):
+        query = '''
+            SELECT pereval_added.id FROM pereval_added
+            JOIN users ON pereval_added.user_id = users.id
+            WHERE users.email = %s
+        '''
+
+        self.cursor.execute(
+            query,
+            (email,)
+        )
+
+        result = []
+        for record in self.cursor.fetchall():
+            result.append(self.get_pereval_by_id(record[0]))
+        return result
 
 
 if __name__ == '__main__':
-    data = {
-        "beauty_title": "пер. ",
-        "title": "Пхия",
-        "other_titles": "Триев",
-        "connect": "",
-        "add_time": "2021-09-22 13:18:13",
-        "user": {
-            "email": "qwerty123@mail.ru", 		
-            "fam": "Пупкин",
-            "name": "Василий",
-            "otc": "Иванович",
-            "phone": "+7 555 55 66"
-        }, 
-        "coords": {
-            "latitude": "45.3842",
-            "longitude": "7.1525",
-            "height": "1200"
-        },
-        "level":{
-            "winter": "",
-            "summer": "1А",
-            "autumn": "1А",
-            "spring": ""
-        },
-        "images": [
-            {
-                "data":"<картинка1>", 
-                "title":"Седловина"
-            }, 
-            {
-                "data":"<картинка>", 
-                "title":"Подъём"
-            }
-        ]
-    }
-
-
     worker = DatabaseWorker()
     worker.connect()
-    worker.add_pereval(data)
+    print(worker.get_pereval_by_id(11))
+    print(worker.get_pereval_list_by_email('qwerty123@mail.ru'))
     worker.disconnect()
