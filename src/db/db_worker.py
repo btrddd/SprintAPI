@@ -31,7 +31,7 @@ class DatabaseWorker:
         if self.connection:
             self.connection.close()
 
-    def insert_data(self, table, data: dict):
+    def insert_data(self, table, data: dict) -> int:
         if not self.connection:
             raise Exception(f'No connection to the database.')
         
@@ -47,8 +47,31 @@ class DatabaseWorker:
         self.cursor.execute(query, values)
         result_id = self.cursor.fetchone()[0]
         return result_id
+    
+    def update_data(self, table: str, data: dict, id: int):
+        if not self.connection:
+            raise Exception(f'No connection to the database.')
+        
+        columns = list(data.keys())
+        values = list(data.values())
+        values.append(id)
 
-    def get_or_create_user(self, user_data):
+        query = sql.SQL('UPDATE {} SET {} WHERE id = %s').format(
+            sql.Identifier(table),
+            sql.SQL(', ').join(
+                [
+                    sql.SQL('{} = %s').format(sql.Identifier(column))
+                    for column in columns
+                ]
+            )
+        )
+
+        self.cursor.execute(query, values)
+
+    def get_or_create_user(self, user_data: dict) -> int:
+        if not self.connection:
+            raise Exception(f'No connection to the database.')
+        
         self.cursor.execute(
             f'SELECT id FROM users WHERE email = %s',
             (user_data['email'],)
@@ -60,7 +83,7 @@ class DatabaseWorker:
         
         return user_id
 
-    def add_pereval(self, data: dict):
+    def add_pereval(self, data: dict) -> int:
         try:
             user_id = self.get_or_create_user(data['user'])
             coords_id = self.insert_data('coords', data['coords'])
@@ -90,8 +113,31 @@ class DatabaseWorker:
         except Exception as ex:
             self.disconnect()
             raise Exception(f'Something went wrong while inserting data:\n{ex}')
+
+    def update_pereval(self, pereval_data: dict):
+        try:
+            coords_data: dict = pereval_data.pop('coords', None)
+            levels_data: dict = pereval_data.pop('levels', None)
+
+            if coords_data:
+                coords_id = coords_data.pop('id')
+                self.update_data('coords', coords_data, coords_id)
+
+            if levels_data:
+                levels_id = levels_data.pop('id')
+                self.update_data('levels', levels_data, levels_id)
+
+            pereval_id = pereval_data.pop('id')
+            self.update_data('pereval_added', pereval_data, pereval_id)        
+
+            self.connection.commit()
+        except Exception as ex:
+            raise Exception(f'Something went wrong while updating:\n{ex}')
+
+    def get_pereval_by_id(self, pereval_id: int) -> dict|None:
+        if not self.connection:
+            raise Exception(f'No connection to the database.')
         
-    def get_pereval_by_id(self, pereval_id):
         query = '''
             WITH pereval_cte AS (
                 SELECT * FROM pereval_added WHERE id = %s
@@ -121,7 +167,10 @@ class DatabaseWorker:
         
         return None
 
-    def get_pereval_list_by_email(self, email):
+    def get_pereval_list_by_email(self, email: str) -> list:
+        if not self.connection:
+            raise Exception(f'No connection to the database.')
+        
         query = '''
             SELECT pereval_added.id FROM pereval_added
             JOIN users ON pereval_added.user_id = users.id
@@ -140,8 +189,24 @@ class DatabaseWorker:
 
 
 if __name__ == '__main__':
+    new_data = {
+        'id': 11, 
+        'title': 'new_title', 
+        'other_titles': 'new_other_title', 
+        'coords': {
+            'id': 12, 
+            'height': 20
+        }, 
+        'levels': {
+            'id': 12,  
+            'summer': '8А', 
+            'spring': '3A'
+        }
+    }
+
     worker = DatabaseWorker()
     worker.connect()
+    worker.update_pereval(new_data)
     print(worker.get_pereval_by_id(11))
     print(worker.get_pereval_list_by_email('qwerty123@mail.ru'))
     worker.disconnect()
