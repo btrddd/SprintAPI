@@ -147,7 +147,13 @@ class DatabaseWorker:
                 pereval_cte.*,
                 row_to_json(users) AS user,
                 row_to_json(coords) AS coords,
-                row_to_json(levels) AS levels
+                row_to_json(levels) AS levels,
+                COALESCE(
+                    (SELECT json_agg(pereval_images)
+                    FROM pereval_images
+                    WHERE pereval_cte.id = pereval_images.pereval_id),
+                    '[]'::json
+                ) AS images
             FROM pereval_cte
             LEFT JOIN users ON pereval_cte.user_id = users.id
             LEFT JOIN coords ON pereval_cte.coords_id = coords.id

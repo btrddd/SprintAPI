@@ -1,15 +1,28 @@
-from fastapi import FastAPI, status, Request, HTTPException
+from fastapi import (
+    FastAPI, status, Request, HTTPException, Path
+)
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 import re
 
 from db.db_worker import DatabaseWorker
 
 
-class UserModel(BaseModel):
+class SubmitDataErrorResponse(BaseModel):
+    status: str
+    message: str 
+    id: None
+
+
+class GetPerevalErrorResponse(BaseModel):
+    status: str
+    message: str
+
+
+class UserRequestModel(BaseModel):
     email: EmailStr
     fam: str
     name: str
@@ -22,9 +35,18 @@ class UserModel(BaseModel):
         if bool(re.match(r'^\+?[0-9\s\-\(\)]{10,20}$', phone)):
             return phone
         raise ValueError('Incorrect "phone" value')
-    
 
-class CoordsModel(BaseModel):
+
+class UserResponseModel(BaseModel):
+    id: int
+    email: str
+    fam: str
+    name: str
+    otc: Optional[str]
+    phone: str
+
+
+class CoordsRequestModel(BaseModel):
     latitude: str
     longitude: str
     height: str
@@ -37,30 +59,53 @@ class CoordsModel(BaseModel):
         except ValueError:
             raise ValueError(f'Incorrect coordinate value')
         return coord
+    
+
+class CoordsResponseModel(BaseModel):
+    id: int
+    latitude: float
+    longitude: float
+    height: int
 
 
-class LevelModel(BaseModel):
+class LevelsRequestModel(BaseModel):
     winter: Optional[str]
     summer: Optional[str]
     autumn: Optional[str]
     spring: Optional[str]
 
 
-class ImageModel(BaseModel):
+class LevelsResponseModel(BaseModel):
+    id: int
+    winter: Optional[str]
+    summer: Optional[str]
+    autumn: Optional[str]
+    spring: Optional[str]
+
+
+class ImageRequestModel(BaseModel):
     data: str
     title: str
 
 
-class SubmitDataRequest(BaseModel):
+class ImageResponseModel(BaseModel):
+    id: int
+    date_added: str
+    data: str
+    title: str
+    pereval_id: int
+
+
+class PerevalRequestModel(BaseModel):
     beauty_title: str
     title: str
     other_titles: Optional[str]
     connect: Optional[str]
     add_time: str
-    user: UserModel
-    coords: CoordsModel
-    level: LevelModel
-    images: list[ImageModel]
+    user: UserRequestModel
+    coords: CoordsRequestModel
+    level: LevelsRequestModel
+    images: list[ImageRequestModel]
 
     @field_validator('add_time')
     @classmethod
@@ -72,7 +117,38 @@ class SubmitDataRequest(BaseModel):
         return date_time         
 
 
-class SubmitDataResponse(BaseModel):
+class PerevalResponseModel(BaseModel):
+    id: int
+    beauty_title: str
+    title: str
+    other_titles: Optional[str]
+    connect: Optional[str]
+    status: str
+    date_added: datetime
+    add_time: datetime
+    user: UserResponseModel
+    coords : CoordsResponseModel
+    levels: LevelsResponseModel
+    images: List[ImageResponseModel]
+
+
+class PatchPerevalRequestModel(BaseModel):
+    id: int
+    beauty_title: Optional[str]
+    title: Optional[str]
+    other_titles: Optional[str]
+    connect: Optional[str]
+    coords: Optional[CoordsRequestModel]
+    level: Optional[LevelsRequestModel]
+    images: Optional[List[ImageRequestModel]]
+
+
+class PatchPerevalResponseModel(BaseModel):
+    state: int
+    message: Optional[str]
+
+
+class SubmitDataResponseModel(BaseModel):
     status: int
     message: Optional[str]
     id: Optional[int]
@@ -85,33 +161,50 @@ app = FastAPI(
 )
 
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            'status': exc.status_code,
-            'message': exc.detail,
-            'id': None
-        }
-    )
-
-
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+async def validation_exception_handler(
+    request: Request, 
+    exc: RequestValidationError
+) -> JSONResponse:
+    path = request.url.path
     error = exc.errors()[0]
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={
-            'status': status.HTTP_400_BAD_REQUEST,
-            'message': f'Error: {error["msg"]}; loc: {error["loc"]}',
-            'id': None
+
+    if path == '/submitData':
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                'status': status.HTTP_422_UNPROCESSABLE_CONTENT,
+                'message': f'Error: {error["msg"]}; loc: {error["loc"]}',
+                'id': None
+            }
+        )
+    elif path.startswith('/submitData/'):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            content={
+                'status': status.HTTP_422_UNPROCESSABLE_CONTENT,
+                'message': f'Error: {error["msg"]}',
+            }
+        )
+
+
+@app.post(
+    path='/submitData', 
+    response_model=SubmitDataResponseModel,
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            'model': SubmitDataErrorResponse,
+            'description': 'ValidationError'
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            'model': SubmitDataErrorResponse,
+            'description': 'Internal server error'
         }
-    )
-
-
-@app.post('/submit', response_model=SubmitDataResponse)
-async def submitData(request: SubmitDataRequest) -> SubmitDataResponse:
+    }
+)
+async def submit_data(
+    request: PerevalRequestModel
+) -> SubmitDataResponseModel:
     request_dict = request.model_dump()
     
     try:
@@ -121,7 +214,11 @@ async def submitData(request: SubmitDataRequest) -> SubmitDataResponse:
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=ex
+            detail={
+                'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': ex,
+                'id': None
+            }
         )
     finally:
         db_worker.disconnect()
@@ -129,11 +226,65 @@ async def submitData(request: SubmitDataRequest) -> SubmitDataResponse:
     if not pereval_id:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail='Error saving to database'
+            detail={
+                'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': 'Error saving to database',
+                'id': None
+            }
         )
     
-    return SubmitDataResponse(
+    return SubmitDataResponseModel(
         status=status.HTTP_200_OK,
         message=None,
         id=pereval_id
     )
+
+
+@app.get(
+    path='/submitData/{id}', 
+    response_model=PerevalResponseModel,
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            'model': GetPerevalErrorResponse,
+            'description': 'ValidationError'
+        },
+        status.HTTP_404_NOT_FOUND: {
+            'model': GetPerevalErrorResponse,
+            'description': 'Not found'
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            'model': GetPerevalErrorResponse,
+            'description': 'Internal server error'
+        }
+    }
+)
+async def get_pereval_by_id(id: int = Path(
+        description='Unique database pereval id',
+        ge=1
+    )
+):
+    try:
+        db_worker = DatabaseWorker()
+        db_worker.connect()
+        pereval_data = db_worker.get_pereval_by_id(id)
+    except Exception as ex:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': ex
+            }
+        )
+    finally:
+        db_worker.disconnect()
+        
+    if pereval_data:
+        return PerevalResponseModel(**pereval_data)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                'status': status.HTTP_404_NOT_FOUND,
+                'message': f'Object with id = {id} not found'
+            }
+        )
