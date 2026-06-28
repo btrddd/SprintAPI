@@ -116,20 +116,21 @@ class DatabaseWorker:
 
     def update_pereval(self, pereval_data: dict):
         try:
+            pereval_id = pereval_data.pop('id')
+            pereval = self.get_pereval_by_id(pereval_id)
+
             coords_data: dict = pereval_data.pop('coords', None)
             levels_data: dict = pereval_data.pop('levels', None)
 
             if coords_data:
-                coords_id = coords_data.pop('id')
+                coords_id = pereval['coords_id']
                 self.update_data('coords', coords_data, coords_id)
 
             if levels_data:
-                levels_id = levels_data.pop('id')
+                levels_id = pereval['levels_id']
                 self.update_data('levels', levels_data, levels_id)
 
-            pereval_id = pereval_data.pop('id')
             self.update_data('pereval_added', pereval_data, pereval_id)        
-
             self.connection.commit()
         except Exception as ex:
             raise Exception(f'Something went wrong while updating:\n{ex}')
@@ -194,11 +195,9 @@ if __name__ == '__main__':
         'title': 'new_title', 
         'other_titles': 'new_other_title', 
         'coords': {
-            'id': 12, 
             'height': 20
         }, 
         'levels': {
-            'id': 12,  
             'summer': '8А', 
             'spring': '3A'
         }
