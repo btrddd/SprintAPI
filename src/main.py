@@ -1,25 +1,31 @@
 from fastapi import (
-    FastAPI, status, Request, HTTPException, Path
+    FastAPI, status, Request, HTTPException, 
+    Path, Query
 )
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, EmailStr, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Literal
 from datetime import datetime
 import re
 
 from db.db_worker import DatabaseWorker
 
 
+class BaseErrorResponse(BaseModel):
+    status: str
+    message: str
+
+
 class SubmitDataErrorResponse(BaseModel):
     status: str
-    message: str 
+    message: str
     id: None
 
 
-class GetPerevalErrorResponse(BaseModel):
-    status: str
-    message: str
+class PatchPerevalErrorResponse(BaseModel):
+    state: Literal[0]
+    message: Optional[str]
 
 
 class UserRequestModel(BaseModel):
@@ -39,7 +45,7 @@ class UserRequestModel(BaseModel):
 
 class UserResponseModel(BaseModel):
     id: int
-    email: str
+    email: EmailStr
     fam: str
     name: str
     otc: Optional[str]
@@ -61,6 +67,12 @@ class CoordsRequestModel(BaseModel):
         return coord
     
 
+class CoordsPatchRequestModel(BaseModel):
+    latitude: str = None
+    longitude: str = None
+    height: str = None
+
+
 class CoordsResponseModel(BaseModel):
     id: int
     latitude: float
@@ -73,6 +85,13 @@ class LevelsRequestModel(BaseModel):
     summer: Optional[str]
     autumn: Optional[str]
     spring: Optional[str]
+
+
+class LevelsPatchRequestModel(BaseModel):
+    winter: Optional[str] = None
+    summer: Optional[str] = None
+    autumn: Optional[str] = None
+    spring: Optional[str] = None
 
 
 class LevelsResponseModel(BaseModel):
@@ -133,19 +152,18 @@ class PerevalResponseModel(BaseModel):
 
 
 class PatchPerevalRequestModel(BaseModel):
-    id: int
-    beauty_title: Optional[str]
-    title: Optional[str]
-    other_titles: Optional[str]
-    connect: Optional[str]
-    coords: Optional[CoordsRequestModel]
-    level: Optional[LevelsRequestModel]
-    images: Optional[List[ImageRequestModel]]
+    beauty_title: Optional[str] = None
+    title: Optional[str] = None
+    other_titles: Optional[str] = None
+    connect: Optional[str] = None
+    coords: Optional[CoordsPatchRequestModel] = None
+    levels: Optional[LevelsPatchRequestModel] = None
+    images: Optional[List[ImageRequestModel]] = None
 
 
 class PatchPerevalResponseModel(BaseModel):
-    state: int
-    message: Optional[str]
+    state: Literal[1]
+    message: None
 
 
 class SubmitDataResponseModel(BaseModel):
@@ -167,25 +185,38 @@ async def validation_exception_handler(
     exc: RequestValidationError
 ) -> JSONResponse:
     path = request.url.path
+    method = request.method
     error = exc.errors()[0]
 
-    if path == '/submitData':
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content={
-                'status': status.HTTP_422_UNPROCESSABLE_CONTENT,
-                'message': f'Error: {error["msg"]}; loc: {error["loc"]}',
-                'id': None
-            }
-        )
-    elif path.startswith('/submitData/'):
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content={
-                'status': status.HTTP_422_UNPROCESSABLE_CONTENT,
-                'message': f'Error: {error["msg"]}',
-            }
-        )
+    if path == '/submitData' and method == 'POST':
+        response_content={
+            'status': status.HTTP_422_UNPROCESSABLE_CONTENT,
+            'message': f'Error: {error["msg"]}; loc: {error["loc"]}',
+            'id': None
+        }
+    elif method == 'PATCH':
+        response_content = {
+            'state': 0,
+            'message': f'Error: {error["msg"]}; loc: {error["loc"]}'
+        }
+    else:
+        response_content={
+            'status': status.HTTP_422_UNPROCESSABLE_CONTENT,
+            'message': f'Error: {error["msg"]}',
+        }
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content=response_content
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.detail
+    )
 
 
 @app.post(
@@ -245,20 +276,21 @@ async def submit_data(
     response_model=PerevalResponseModel,
     responses={
         status.HTTP_422_UNPROCESSABLE_CONTENT: {
-            'model': GetPerevalErrorResponse,
-            'description': 'ValidationError'
+            'model': BaseErrorResponse,
+            'description': 'Validation error'
         },
         status.HTTP_404_NOT_FOUND: {
-            'model': GetPerevalErrorResponse,
+            'model': BaseErrorResponse,
             'description': 'Not found'
         },
         status.HTTP_500_INTERNAL_SERVER_ERROR: {
-            'model': GetPerevalErrorResponse,
+            'model': BaseErrorResponse,
             'description': 'Internal server error'
         }
     }
 )
-async def get_pereval_by_id(id: int = Path(
+async def get_pereval_by_id(
+    id: int = Path(
         description='Unique database pereval id',
         ge=1
     )
@@ -286,5 +318,108 @@ async def get_pereval_by_id(id: int = Path(
             detail={
                 'status': status.HTTP_404_NOT_FOUND,
                 'message': f'Object with id = {id} not found'
+            }
+        )
+    
+
+@app.patch(
+    path='/submitData/{id}',
+    response_model=PatchPerevalResponseModel,
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            'model': PatchPerevalErrorResponse,
+            'description': 'Validation error'
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            'model': PatchPerevalErrorResponse,
+            'description': 'Internal server error'
+        }
+    }
+)
+async def patch_pereval(
+    request: PatchPerevalRequestModel,
+    id: int = Path(
+        description='Unique database pereval id',
+        ge=1
+    )
+):
+    request_dict = request.model_dump(exclude_unset=True)
+
+    try:
+        db_worker = DatabaseWorker()
+        db_worker.connect()
+        state, message = db_worker.update_pereval(id, request_dict)
+
+        if state == 1:
+            return PatchPerevalResponseModel(
+                state=1,
+                message=message
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    'state': 0,
+                    'message': message
+                }
+            )
+    except Exception as ex:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                'state': 0,
+                'message': str(ex)
+            }
+        )
+    finally:
+        db_worker.disconnect()
+
+
+@app.get(
+    path='/submitData/',
+    response_model=Dict[int, PerevalResponseModel],
+    responses={
+        status.HTTP_422_UNPROCESSABLE_CONTENT: {
+            'model': BaseErrorResponse,
+            'description': 'Validation error'
+        },
+        status.HTTP_404_NOT_FOUND: {
+            'model': BaseErrorResponse,
+            'description': 'Not found'
+        },
+        status.HTTP_500_INTERNAL_SERVER_ERROR: {
+            'model': BaseErrorResponse,
+            'description': 'Internal server error'
+        }
+    }
+)
+async def get_user_perevals(
+    user_email: str = Query(
+        description='User`s Email'
+    )
+):
+    try: 
+        db_worker = DatabaseWorker()
+        db_worker.connect()
+        pereval_list = db_worker.get_pereval_list_by_email(user_email)
+    except Exception as ex:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                'message': ex
+            }
+        )
+    finally:
+        db_worker.disconnect()
+
+    if pereval_list:
+        return dict(enumerate(pereval_list, start=1))
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                'status': status.HTTP_404_NOT_FOUND,
+                'message': f'No objects found created by the user with email {user_email}'
             }
         )

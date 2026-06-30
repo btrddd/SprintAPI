@@ -114,26 +114,27 @@ class DatabaseWorker:
             self.disconnect()
             raise Exception(f'Something went wrong while inserting data:\n{ex}')
 
-    def update_pereval(self, pereval_data: dict):
+    def update_pereval(self, pereval_id, data: dict):
         try:
-            pereval_id = pereval_data.pop('id')
             pereval = self.get_pereval_by_id(pereval_id)
+            print(pereval)
 
-            coords_data: dict = pereval_data.pop('coords', None)
-            levels_data: dict = pereval_data.pop('levels', None)
+            coords_data: dict = data.pop('coords', None)
+            levels_data: dict = data.pop('levels', None)
 
             if coords_data:
-                coords_id = pereval['coords_id']
+                coords_id = pereval['coords']['id']
                 self.update_data('coords', coords_data, coords_id)
 
             if levels_data:
-                levels_id = pereval['levels_id']
+                levels_id = pereval['levels']['id']
                 self.update_data('levels', levels_data, levels_id)
 
-            self.update_data('pereval_added', pereval_data, pereval_id)        
+            self.update_data('pereval_added', data, pereval_id)        
             self.connection.commit()
+            return 1, None
         except Exception as ex:
-            raise Exception(f'Something went wrong while updating:\n{ex}')
+            return 0, ex
 
     def get_pereval_by_id(self, pereval_id: int) -> dict|None:
         if not self.connection:
@@ -211,7 +212,7 @@ if __name__ == '__main__':
 
     worker = DatabaseWorker()
     worker.connect()
-    worker.update_pereval(new_data)
+    # worker.update_pereval(new_data)
     print(worker.get_pereval_by_id(11))
-    print(worker.get_pereval_list_by_email('qwerty123@mail.ru'))
+    # print(worker.get_pereval_list_by_email('qwerty123@mail.ru'))
     worker.disconnect()
