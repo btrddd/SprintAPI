@@ -4,6 +4,11 @@ from fastapi import APIRouter, status, Query, Path
 from fastapi.exceptions import HTTPException
 
 from src.db.db_worker import DatabaseWorker
+from src.exceptions import (
+    DatabaseError, 
+    NotFoundError,
+    BadRequestError
+)
 from src.models.requests import (
     PerevalRequestModel,
     PatchPerevalRequestModel
@@ -63,14 +68,7 @@ async def submit_data(
         pereval_id = db_worker.add_pereval(request_dict)
 
         if not pereval_id:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    'message': 'Error saving to database',
-                    'id': None
-                }
-            )
+            raise DatabaseError('Error saving to database')
         
         return SubmitDataResponseModel(
             status=status.HTTP_200_OK,
@@ -78,12 +76,22 @@ async def submit_data(
             id=pereval_id
         )
     
+    except DatabaseError as ex:
+        raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    'message': str(ex),
+                    'id': None
+                }
+            )
+    
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': ex,
+                'message': str(ex),
                 'id': None
             }
         )
@@ -136,25 +144,28 @@ async def get_pereval_by_id(
         pereval_data = db_worker.get_pereval_by_id(id)
 
         if not pereval_data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    'status': status.HTTP_404_NOT_FOUND,
-                    'message': f'Object with id = {id} not found'
-                }
-            )
+            raise NotFoundError(f'Object with id = {id} not found')
         
         return PerevalResponseModel(**pereval_data)
 
+    except NotFoundError as ex:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                'status': status.HTTP_404_NOT_FOUND,
+                'message': str(ex)
+            }
+        )
+    
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': ex
+                'message': str(ex)
             }
         )
-    
+
     finally:
         if db_worker:
             db_worker.disconnect()
@@ -211,7 +222,7 @@ async def patch_pereval(
     if not request_dict:
         return PatchPerevalResponseModel(
             state=1,
-            message=message
+            message=None
         )
 
     try:
@@ -221,39 +232,41 @@ async def patch_pereval(
         pereval = db_worker.get_pereval_by_id(id)
 
         if not pereval:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    'state': 0,
-                    'message': f'Pereval with id = {id} not found'
-                }
-            )
+            raise NotFoundError( f'Pereval with id = {id} not found')
 
         if pereval['status'] != 'new':
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    'state': 0,
-                    'message': f'Can`t update pereval with status other than "new"'
-                }
+            raise BadRequestError(
+                'Can`t update pereval with status other than "new"'
             )
 
         state, message = db_worker.update_pereval(pereval, request_dict)
 
-        if state == 1:
-            return PatchPerevalResponseModel(
-                state=1,
-                message=message
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    'state': 0,
-                    'message': message
-                }
-            )
+        if state == 0:
+            raise Exception(message)
         
+        return PatchPerevalResponseModel(
+            state=1,
+            message=None
+        )
+    
+    except NotFoundError as ex:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                'state': 0,
+                'message': str(ex)
+            }
+        )
+    
+    except BadRequestError as ex:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                'state': 0,
+                'message': str(ex)
+            }
+        )
+    
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -313,22 +326,27 @@ async def get_user_perevals(
         pereval_list = db_worker.get_pereval_list_by_email(user_email)
 
         if not pereval_list:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail={
-                    'status': status.HTTP_404_NOT_FOUND,
-                    'message': f'No objects found created by the user with email {user_email}'
-                }
+            raise NotFoundError(
+                f'No objects found created by the user with email {user_email}'
             )
         
         return dict(enumerate(pereval_list, start=1))
 
+    except NotFoundError as ex:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                'status': status.HTTP_404_NOT_FOUND,
+                'message': str(ex)
+            }
+        )
+    
     except Exception as ex:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 'status': status.HTTP_500_INTERNAL_SERVER_ERROR,
-                'message': ex
+                'message': str(ex)
             }
         )
     

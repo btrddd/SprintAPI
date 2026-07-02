@@ -92,7 +92,7 @@ class DatabaseWorker:
             return result_id
         
         except Exception as ex:
-            raise Exception(f'Something went wrong while inserting data:\n{ex}')
+            raise Exception(f'Something went wrong while inserting data: {ex}')
 
     def update_data(self, table: str, data: dict[str, Any], id: int) -> None:
         '''
@@ -126,7 +126,7 @@ class DatabaseWorker:
             self._cursor.execute(query, values)
 
         except Exception as ex:
-            raise Exception(f'Something went wrong while updating data:\n{ex}')
+            raise Exception(f'Something went wrong while updating data: {ex}')
 
     def get_or_create_user(self, user_data: dict[str, Any]) -> int:
         '''
@@ -149,7 +149,7 @@ class DatabaseWorker:
                 f'SELECT id FROM users WHERE email = %s',
                 (user_data['email'],)
             )
-            user_id = self._cursor.fetchone()[0]
+            user_id = self._cursor.fetchone()
 
             if not user_id:
                 user_id = self.insert_data('users', user_data)
@@ -157,7 +157,7 @@ class DatabaseWorker:
             return user_id
         
         except Exception as ex:
-            raise Exception(f'Something went wrong while getting or creating user:\n{ex}')
+            raise Exception(f'Something went wrong while getting or creating user: {ex}')
 
     def add_pereval(self, data: dict[str, Any]) -> int:
         '''
@@ -202,7 +202,7 @@ class DatabaseWorker:
             return pereval_id
         
         except Exception as ex:
-            raise Exception(f'Something went wrong while adding pereval:\n{ex}')
+            raise Exception(f'Something went wrong while adding pereval: {ex}')
 
     def update_pereval(
         self, 
@@ -295,7 +295,7 @@ class DatabaseWorker:
             return None
         
         except Exception as ex:
-            raise Exception(f'Something went wrong while getting pereval:\n{ex}')
+            raise Exception(f'Something went wrong while getting pereval: {ex}')
 
     def get_pereval_list_by_email(self, email: str) -> List[Dict[str, Any]]:
         '''
@@ -330,4 +330,4 @@ class DatabaseWorker:
                 result.append(self.get_pereval_by_id(record[0]))
             return result
         except Exception as ex:
-            raise Exception(f'Something went wrong while getting pereval list:\n{ex}')
+            raise Exception(f'Something went wrong while getting pereval list: {ex}')
